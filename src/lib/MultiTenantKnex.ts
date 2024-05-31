@@ -117,7 +117,7 @@ class MultiTenantKnex {
 
       // Check if there are any pending migrations
       const pendingMigrations = migrationFiles[1]; // migrationFiles[1] contains the pending migrations
-      console.log("pendingMigrations", pendingMigrations);
+      console.log("pendingMigrations v1.1.0", pendingMigrations);
 
       if (pendingMigrations.length === 0) {
         console.log(
@@ -126,15 +126,13 @@ class MultiTenantKnex {
         return null;
       }
 
-      // Return a function that runs the migrations again if needed
+      // Return a function that runs the migrations sequentially if needed
       return async () => {
-        await Promise.all(
-          pendingMigrations.map(async (migrationFile) => {
-            await connection.migrate.up({
-              name: migrationFile.file || migrationFile.name,
-            });
-          })
-        );
+        for (const migrationFile of pendingMigrations) {
+          await connection.migrate.up({
+            name: migrationFile.file || migrationFile.name,
+          });
+        }
       };
     } catch (error) {
       if (error instanceof Error) {

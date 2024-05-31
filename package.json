@@ -1,6 +1,6 @@
 {
   "name": "multi-tenant-knex",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "description": "A library for building multi-tenant applications using TypeScript and Knex.js for database management.",
   "main": "dist/index.js",
   "module": "dist/index.mjs",
