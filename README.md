@@ -54,8 +54,45 @@ app.ts
 index.ts
 knexfile.ts
 ```
+2. User migration file `20240527181008_user_table.ts`
+   
+```typescript
+import type { Knex } from 'knex';
 
-2. Initialize your Knex instance. (Example of `knexfile.ts`)
+export async function up(knex: Knex): Promise<void> {
+  await knex.schema.createTable('users', (table: Knex.TableBuilder) => {
+    table.increments();
+    table.timestamps(true, true);
+    table.string('name').unique().notNullable();
+    table.string('email').unique().notNullable();
+  });
+}
+
+export async function down(knex: Knex): Promise<void> {
+  await knex.schema.dropTable('users');
+}
+```
+3. Tenant migration file `20240527181456_tenant_table.ts`
+```typescript
+import type { Knex } from 'knex';
+
+export async function up(knex: Knex): Promise<void> {
+  await knex.schema.createTable('tenants', (table: Knex.TableBuilder) => {
+    table.increments();
+    table.timestamps(true, true);
+    table.string('name').unique().notNullable();
+    table.string('subdomain').notNullable();
+    table.string('dbName').notNullable();
+    table.string('status').notNullable();
+  });
+}
+
+export async function down(knex: Knex): Promise<void> {
+  await knex.schema.dropTable('tenants');
+}
+```
+
+4. Initialize your Knex instance. (Example of `knexfile.ts`)
 
 ```typescript
 import * as path from 'path';
@@ -88,7 +125,7 @@ export default {
   },
 };
 ```
-3. Create the config file of environment variables (Example of `src/config/index.ts`)
+5. Create the config file of environment variables (Example of `src/config/index.ts`)
 ```typescript
 import * as dotenv from 'dotenv';
 
@@ -120,7 +157,7 @@ export const config: Env = {
 
 ```
 
-4. Create the tenant config file in the models package. (Example of `src/models/tenantConfig.ts`)
+6. Create the tenant config file in the models package. (Example of `src/models/tenantConfig.ts`)
 
 ```typescript
 import knexConfig from '../../knexfile';
@@ -148,7 +185,7 @@ export const TenantConfig = {
 };
 ```
 
-4. Create the controller responsible for creating users and tenants. (Example of `src/controllers/user.controller.ts`)
+7. Create the controller responsible for creating users and tenants. (Example of `src/controllers/user.controller.ts`)
 
 ```typescript
 import { Request, Response } from 'express';
@@ -202,7 +239,7 @@ export const UserController = {
 
 ```
 
-5. Setup the route to use the main middleware (Example of `src/router/user.routes.ts`)
+8. Setup the route to use the main middleware (Example of `src/router/user.routes.ts`)
 ```typescript
 import { Router } from 'express';
 import { UserController } from '../controllers/user.controller';
@@ -214,7 +251,7 @@ router.post('/', TenantConfig.mainMiddleware, UserController.create);
 
 export default router;
 ```
-6. Setup the route to use the tenant middleware (Example of `src/router/task.routes.ts`)
+9. Setup the route to use the tenant middleware (Example of `src/router/task.routes.ts`)
 ```typescript
 import { Router } from 'express';
 import { TaskController } from '../controllers/task.controller';
