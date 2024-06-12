@@ -15,6 +15,7 @@
   "author": "Richard Nick Alvi Ganoza",
   "license": "MIT",
   "dependencies": {
+    "jsonwebtoken": "^9.0.2",
     "knex": "^2.3.0",
     "pg": "^8.8.0",
     "tsup": "^8.0.2",
@@ -23,6 +24,7 @@
   "devDependencies": {
     "@types/express": "^4.17.21",
     "@types/glob": "^8.0.3",
+    "@types/jsonwebtoken": "^9.0.6",
     "@types/node": "^20.4.2",
     "@typescript-eslint/eslint-plugin": "^5.59.1",
     "@typescript-eslint/parser": "^5.59.1",

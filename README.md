@@ -1,8 +1,7 @@
 <h1 align="center" style="border-bottom: solid 1px;">📦 multi-tenant-knex 🏢</h1>
 <h4 align="center">Create multi-tenant applications effortlessly with this library, freeing your mind from the complexities.</h4>
 
-`multi-tenant-knex` is a library designed for building multi-tenant applications using TypeScript and Knex.js for database management. It provides utilities to manage multiple tenants seamlessly.
-
+`multi-tenant-knex` is a library designed for building multi-tenant applications using TypeScript and [Knex.js](https://knexjs.org/) for database management with [Objection.js](https://vincit.github.io/objection.js/). It provides utilities to manage multiple tenants seamlessly.
 
 ## Table of Contents
 
@@ -143,6 +142,7 @@ interface Env {
   dbUser: string;
   dbDatabase: string;
   dbPassword: string;
+  //jwtSecret: string; (if you want use JWT instead of a single header)
 }
 
 export const config: Env = {
@@ -153,6 +153,7 @@ export const config: Env = {
   dbUser: process.env.DB_USER || 'default',
   dbDatabase: process.env.DB_NAME || 'default',
   dbPassword: process.env.DB_PASS || 'default',
+  //jwtSecret: process.env.JWT_SECRET || 'secret', (if you want use JWT instead of a single header)
 };
 
 ```
@@ -181,8 +182,13 @@ export const TenantConfig = {
   multi,
   db,
   mainMiddleware: mainMiddleware(multi),
-  tenantMiddleware: tenantMiddleware(multi),
+  tenantMiddleware: tenantMiddleware(multi), tenantMiddleware: tenantMiddleware(multi), // Use only the x-tenant-id, but if you want to use JWT you can add a new parameter.
 };
+```
+Example:
+
+```javascript
+tenantMiddleware(multi, config.jwtSecret)
 ```
 
 7. Create the controller responsible for creating users and tenants. (Example of `src/controllers/user.controller.ts`)
@@ -276,9 +282,10 @@ This will generate the CommonJS and ES Module outputs along with the type defini
 
 ## Features
 
-- Multi-tenant support for PostgreSQL using Knex.js.
-- Easy tenant management with dynamic tenant configuration.
-- Written in TypeScript, providing type safety and better developer experience.
+- Supports multi-tenancy for PostgreSQL utilizing Knex.js and Objection.js.
+- Facilitates simple tenant management with dynamic configuration.
+- Developed in TypeScript for enhanced type safety and an improved developer experience.
+- Simplifies implementation with JWT token support.
 
 ## Contributing
 
