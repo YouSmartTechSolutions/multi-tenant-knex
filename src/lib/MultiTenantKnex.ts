@@ -8,26 +8,42 @@ import * as util from "util";
 const readdirAsync = util.promisify(fs.readdir);
 
 class MultiTenantKnex {
-  private knexConfig: Knex.Config;
-  private mainKnex: Knex;
-  private modelsPath: string;
+  private systemKnexConfig: Knex.Config;
+  private tenantKnexConfig: Knex.Config;
+  private systemKnex: Knex;
+  private tenantKnex: Knex;
+  private systemModelsPath: string;
+  private tenantModelsPath: string;
   private tenantConnections: { [key: string]: Knex };
   private tenantORMs: { [key: string]: any };
   private mainORM: any;
   private currentORM: any;
+  private tenantSeedRoute: string;
 
-  constructor(knexConfig: Knex.Config, modelsPath: string) {
-    this.knexConfig = knexConfig;
-    this.modelsPath = modelsPath;
+  constructor(
+    systemKnexConfig: Knex.Config,
+    tenantKnexConfig: Knex.Config,
+    systemModelsPath: string,
+    tenantModelsPath: string
+  ) {
+    this.systemKnexConfig = systemKnexConfig;
+    this.tenantKnexConfig = tenantKnexConfig;
+    this.systemModelsPath = systemModelsPath;
+    this.tenantModelsPath = tenantModelsPath;
     this.tenantConnections = {};
     this.tenantORMs = {};
     this.mainORM = {};
-    this.mainKnex = knex(knexConfig);
+    this.systemKnex = knex(systemKnexConfig);
+    this.tenantKnex = knex(tenantKnexConfig);
     this.currentORM = this.mainORM;
+    this.tenantSeedRoute = "../../../knex/seeds/tenant";
   }
 
   async buildMainORM() {
-    this.mainORM = await this._importModels(this.mainKnex);
+    this.mainORM = await this._importModels(
+      this.systemKnex,
+      this.systemModelsPath
+    );
   }
 
   async createTenant(subdomain: string) {
@@ -50,12 +66,12 @@ class MultiTenantKnex {
     }
 
     // Create a new database for the tenant
-    await this.mainKnex.raw(`CREATE DATABASE tenant_${subdomain}`);
+    await this.systemKnex.raw(`CREATE DATABASE tenant_${subdomain}`);
 
     // Create a new connection for the tenant
     const tenantConnection = this._createTenantConnection(subdomain);
 
-    const pathSeeds = path.join(this.modelsPath, `../../knex/seeds`);
+    const pathSeeds = path.join(this.tenantModelsPath, this.tenantSeedRoute);
 
     // Create the tenant's tables
     const migrationTenant = await this._initializeMigrations(tenantConnection);
@@ -69,7 +85,10 @@ class MultiTenantKnex {
     await seedersTenant();
 
     // Create the tenant's ORM
-    this.tenantORMs[subdomain] = await this._importModels(tenantConnection);
+    this.tenantORMs[subdomain] = await this._importModels(
+      tenantConnection,
+      this.tenantModelsPath
+    );
 
     return tenant;
   }
@@ -79,9 +98,9 @@ class MultiTenantKnex {
       this.tenantConnections[subdomain].destroy();
     }
     const tenantConnection = knex({
-      ...this.knexConfig,
+      ...this.tenantKnexConfig,
       connection: {
-        ...(this.knexConfig.connection as object),
+        ...(this.tenantKnexConfig.connection as object),
         database: `tenant_${subdomain}`,
       },
     });
@@ -90,13 +109,13 @@ class MultiTenantKnex {
   }
 
   async migrate() {
-    await this.migrateMainDb();
+    //await this.migrateMainDb();
     await this.migrateAllTenants();
     await this.seedsAllTenants();
   }
 
   async migrateMainDb() {
-    const migrateMainDb = await this._initializeMigrations(this.mainKnex);
+    const migrateMainDb = await this._initializeMigrations(this.tenantKnex);
     try {
       if (migrateMainDb) await migrateMainDb();
     } catch (error) {
@@ -206,7 +225,7 @@ class MultiTenantKnex {
   async seedsAllTenants() {
     try {
       const tenants = await this.getDbTenants();
-      const pathSeeds = path.join(this.modelsPath, `../../knex/seeds`);
+      const pathSeeds = path.join(this.tenantModelsPath, this.tenantSeedRoute);
       const seedsPromises = tenants.map(async (tenant) => {
         const tenantConnection = this._createTenantConnection(tenant.subdomain);
         return this._initializeSeeders(tenantConnection, pathSeeds);
@@ -236,7 +255,7 @@ class MultiTenantKnex {
   }
 
   async getDbTenants(): Promise<iTenant[]> {
-    const query = this.mainKnex.queryBuilder().select("*").from("Tenants");
+    const query = this.systemKnex.queryBuilder().select("*").from("Tenants");
     const tenants = await query;
     return tenants;
   }
@@ -254,7 +273,8 @@ class MultiTenantKnex {
     }
     for (const subdomain in this.tenantConnections) {
       this.tenantORMs[subdomain] = await this._importModels(
-        this.tenantConnections[subdomain]
+        this.tenantConnections[subdomain],
+        this.tenantModelsPath
       );
     }
   }
@@ -272,13 +292,19 @@ class MultiTenantKnex {
       throw new Error(`No tenant with subdomain ${subdomain}`);
     }
     const tenantConnection = this._createTenantConnection(subdomain);
-    this.tenantORMs[subdomain] = await this._importModels(tenantConnection);
+    this.tenantORMs[subdomain] = await this._importModels(
+      tenantConnection,
+      this.tenantModelsPath
+    );
     this.currentORM = this.tenantORMs[subdomain];
     console.log("currentORM", this.currentORM);
   }
 
   async setCurrentMainConnection() {
-    this.mainORM = await this._importModels(this.mainKnex);
+    this.mainORM = await this._importModels(
+      this.systemKnex,
+      this.systemModelsPath
+    );
     this.currentORM = this.mainORM;
   }
 
@@ -289,12 +315,13 @@ class MultiTenantKnex {
     return this.currentORM;
   }
 
-  private async _importModels(connection: Knex) {
+  private async _importModels(connection: Knex, modelsPath: string) {
     const orm: { [key: string]: any } = {};
-    const modelFiles = this._getModelFiles(this.modelsPath);
+    const modelFiles = this._getModelFiles(modelsPath);
+    console.log('hey', modelsPath);
     await Promise.all(
       modelFiles.map(async (file) => {
-        const modelModule = await import(path.join(this.modelsPath, file));
+        const modelModule = await import(path.join(modelsPath, file));
         for (const modelName in modelModule) {
           orm[modelName] = modelModule[modelName];
           modelModule[modelName].knex(connection);

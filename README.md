@@ -27,10 +27,18 @@ npm install multi-tenant-knex
 ```
 knex
   - migrations
-      20240527181008_user_table.ts
-      20240527181456_tenant_table.ts
-      20240527181888_task_table.ts
+    - system 
+      20240527181008_users_table.ts
+      20240527181456_tenants_table.ts
+    - tenant
+      20240527181010_users_table.ts
+      20240527181809_tasks_table.ts
   - seeds
+    - system 
+      20240527181012_users.ts
+    - tenant
+      20240527181015_users.ts
+      20240527181822_tasks.ts
 node_modules
 src
   - config
@@ -41,19 +49,24 @@ src
   - db
       knex.ts
   - models
+    - system
       user.model.ts
       tenant.model.ts
+    - tenant
+      user.model.ts 
       task.model.ts
-      tenantConfig.ts
   - router
+    - system
+      tenant.routes.ts
+    - tenant
       user.routes.ts
       task.routes.ts
-      index.ts
+    index.ts
 app.ts
 index.ts
 knexfile.ts
 ```
-2. User migration file `20240527181008_user_table.ts`
+2. User migration file `20240527181008_users_table.ts`
    
 ```typescript
 import type { Knex } from 'knex';
@@ -71,7 +84,7 @@ export async function down(knex: Knex): Promise<void> {
   await knex.schema.dropTable('users');
 }
 ```
-3. Tenant migration file `20240527181456_tenant_table.ts`
+3. Tenant migration file `20240527181456_tenants_table.ts`
 ```typescript
 import type { Knex } from 'knex';
 
@@ -100,19 +113,17 @@ import { config } from './src/config';
 
 const defaultKnexConfig = {
   client: 'pg',
-  migrations: {
-    tableName: 'knex_migrations',
-    directory: path.resolve('knex/migrations'),
-  },
-  seeds: {
-    directory: path.resolve('knex/seeds'),
-  },
   ...objection.knexSnakeCaseMappers(),
   useNullAsDefault: true,
+  debug: false,
+  pool: {
+    min: 2,
+    max: 10,
+  },
 };
 
-export default {
-  development: {
+const knexConfig = {
+  system: {
     ...defaultKnexConfig,
     connection: {
       host: config.dbHost,
@@ -121,8 +132,39 @@ export default {
       database: config.dbDatabase,
       password: config.dbPassword,
     },
+    migrations: {
+      directory: path.resolve('knex/migrations/system'),
+      extension: 'ts',
+      tableName: 'knex_migrations_system',
+    },
+    seeds: {
+      directory: path.resolve('knex/seeds/system'),
+      extension: 'ts',
+    },
+  },
+  tenant: {
+    ...defaultKnexConfig,
+    connection: {
+      host: config.dbHost,
+      port: Number(config.dbPort),
+      user: config.dbUser,
+      database: config.dbDatabase,
+      password: config.dbPassword,
+    },
+    migrations: {
+      directory: path.resolve('knex/migrations/tenant'),
+      tableName: 'knex_migrations_tenant',
+      extension: 'ts',
+    },
+    seeds: {
+      directory: path.resolve('knex/seeds/tenant'),
+      extension: 'ts',
+    },
   },
 };
+
+export default knexConfig;
+
 ```
 5. Create the config file of environment variables (Example of `src/config/index.ts`)
 ```typescript
@@ -165,25 +207,42 @@ import knexConfig from '../../knexfile';
 import { config } from '../config';
 import { fileURLToPath } from 'url';
 import path from 'path';
-import { MultiTenantKnex, mainMiddleware, tenantMiddleware } from 'multi-tenant-knex';
+import {
+  MultiTenantKnex,
+  mainMiddleware,
+  tenantMiddleware,
+} from 'multi-tenant-knex';
 
 // Derive the directory name from the ES module URL
 const __filename = fileURLToPath(import.meta.url);
 const modelsPath = path.dirname(__filename);
 
-const multi = new MultiTenantKnex(knexConfig[config.env], modelsPath);
+const modelsPathTenant = `${modelsPath}/tenant`;
+const modelsPathSystem = `${modelsPath}/system`;
+
+const multi = new MultiTenantKnex(
+  knexConfig['system'],
+  knexConfig['tenant'],
+  modelsPathSystem,
+  modelsPathTenant,
+);
 multi.buildMainORM();
+
 multi.buildTenantORMs().then(() => {
   console.log('Tenant ORM built');
 });
+
 const db = () => multi.getCurrentORM();
+console.log(db());
 
 export const TenantConfig = {
   multi,
   db,
   mainMiddleware: mainMiddleware(multi),
-  tenantMiddleware: tenantMiddleware(multi), tenantMiddleware: tenantMiddleware(multi), // Use only the x-tenant-id, but if you want to use JWT you can add a new parameter.
+  tenantMiddleware: tenantMiddleware(multi),
+  /* Use only the x-tenant-id, but if you want to use JWT you can add a new parameter.*/
 };
+
 ```
 Example:
 
@@ -205,34 +264,46 @@ export const create = async (
   const { name, email } = req.body;
   try {
     // Attempt to create a user in the main database
+    mainTrx = await transaction.start(TenantConfig.db().User.knex());
     await TenantConfig.multi.buildMainORM();
-    await TenantConfig.db().User.query().insert({
+    await TenantConfig.db().User.query(mainTrx).insert({
       name,
       email,
     });
+
+    await mainTrx.commit();
 
     try {
       // Attempt to create the tenant
       const tenant = await TenantConfig.multi.createTenant(name);
 
-      TenantConfig.multi.setCurrentORM(tenant.subdomain);
-      TenantConfig.multi.migrate();
+     await TenantConfig.multi.migrate();
+      await TenantConfig.multi.setCurrentTenantConnection(tenant.subdomain);
+
+
+    // Start a transaction for the tenant's database
+      tenantTrx = await transaction.start(TenantConfig.db().UserTenant.knex());
 
       // Create the user in the tenant's database
-      const user = await TenantConfig.db().User.query().insert({
+      const user = await TenantConfig.db().User.query(tenantTrx).insert({
         name,
         email,
       });
+
+      await tenantTrx.commit();
 
       return res.status(StatusCodes.CREATED).json({
         name: user.name,
         email: user.email,
         tenant_id: tenant.subdomain,
       });
+
     } catch (e: any) {
+      if (tenantTrx) await tenantTrx.rollback();
       return res.status(StatusCodes.CONFLICT).json({ error: e.message });
     }
   } catch (e) {
+    if (mainTrx) await mainTrx.rollback();
     return res
       .status(StatusCodes.INTERNAL_SERVER_ERROR)
       .json({ error: 'An error occurred while creating the user' + e });
