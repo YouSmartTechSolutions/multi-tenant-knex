@@ -254,6 +254,66 @@ class MultiTenantKnex {
     }
   }
 
+  async rollbackAllTenants() {
+    try {
+      const tenants = await this.getDbTenants();
+      const rollbackPromises = tenants.map(async (tenant) => {
+        const tenantConnection = this._createTenantConnection(tenant.subdomain);
+        return this._rollbackMigrations(tenantConnection);
+      });
+
+      const rollbackFunctions = await Promise.all(rollbackPromises);
+
+      for (const rollback of rollbackFunctions) {
+        if (rollback) {
+          try {
+            await rollback();
+          } catch (error) {
+            if (error instanceof Error) {
+              console.warn("Rollback warning for tenant", error);
+            } else {
+              throw error;
+            }
+          }
+        }
+      }
+
+      console.log("All tenant rollbacks completed successfully.");
+    } catch (error) {
+      console.error("Error rolling back all tenants:", error);
+      throw error;
+    }
+  }
+
+  private async _rollbackMigrations(
+    connection: Knex
+  ): Promise<(() => Promise<void>) | null> {
+    try {
+      const migrationFiles: IMigration[][] = await connection.migrate.list();
+
+      // Check if there are any completed migrations
+      const completedMigrations = migrationFiles[0]; // migrationFiles[0] contains the completed migrations
+      console.log("completedMigrations", completedMigrations);
+
+      if (completedMigrations.length === 0) {
+        console.log("No migrations to rollback.");
+        return null;
+      }
+
+      // Return a function that rolls back the migrations sequentially if needed
+      return async () => {
+        await connection.migrate.rollback();
+      };
+    } catch (error) {
+      if (error instanceof Error) {
+        console.error("Error initializing rollback:", error);
+      } else {
+        console.error("Unexpected error initializing rollback:", error);
+      }
+      throw error;
+    }
+  }
+
   async getDbTenants(): Promise<iTenant[]> {
     const query = this.systemKnex.queryBuilder().select("*").from("Tenants");
     const tenants = await query;
@@ -318,7 +378,7 @@ class MultiTenantKnex {
   private async _importModels(connection: Knex, modelsPath: string) {
     const orm: { [key: string]: any } = {};
     const modelFiles = this._getModelFiles(modelsPath);
-    console.log('hey', modelsPath);
+    console.log("hey", modelsPath);
     await Promise.all(
       modelFiles.map(async (file) => {
         const modelModule = await import(path.join(modelsPath, file));
